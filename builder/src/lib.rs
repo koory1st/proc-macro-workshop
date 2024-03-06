@@ -1,8 +1,10 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn;
+use syn::{self, Data::Struct, DataStruct, Field, Fields::Named, FieldsNamed};
 use syn::DeriveInput;
+use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
+use syn::token::Comma;
 
 #[proc_macro_derive(Builder)]
 pub fn derive(input: TokenStream) -> TokenStream {
@@ -18,7 +20,8 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
 fn get_expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let ident_literal = st.ident.to_string();
-    // let data = st.data;
+
+    let data = get_data(st);
 
     let builder_name = format!("{}Builder", ident_literal);
     let builder_ident = syn::Ident::new(&builder_name, st.span());
@@ -27,4 +30,12 @@ fn get_expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
       struct #builder_ident{}
     );
     Ok(rt)
+}
+
+fn get_data(st: &DeriveInput) -> syn::Result<&Punctuated<Field, Comma>> {
+    if let Struct(DataStruct { fields: Named(FieldsNamed { named: ref fields, .. }), .. }) = st.data {
+        return Ok(fields);
+    }
+
+    Err(syn::Error::new_spanned(st, "No struct"))
 }
