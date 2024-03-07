@@ -21,13 +21,17 @@ pub fn derive(input: TokenStream) -> TokenStream {
 fn get_expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let ident_literal = st.ident.to_string();
 
-    let data = get_data(st);
+    let data = get_data(st)?;
+    let data_idents:Vec<_>  = data.iter().map(|f| &f.ident).collect();
+    let data_types:Vec<_>  = data.iter().map(|f| &f.ty).collect();
 
     let builder_name = format!("{}Builder", ident_literal);
     let builder_ident = syn::Ident::new(&builder_name, st.span());
 
     let rt = quote!(
-      struct #builder_ident{}
+      struct #builder_ident{
+            #(#data_idents: std::option::Option<#data_types>),*
+      }
     );
     Ok(rt)
 }
