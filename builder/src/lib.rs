@@ -19,6 +19,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
 }
 
 fn get_expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let ident = &st.ident;
     let ident_literal = st.ident.to_string();
 
     let data = get_data(st)?;
@@ -29,9 +30,16 @@ fn get_expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let builder_ident = syn::Ident::new(&builder_name, st.span());
 
     let rt = quote!(
-      struct #builder_ident{
+        struct #builder_ident {
             #(#data_idents: std::option::Option<#data_types>),*
-      }
+        }
+        impl #ident {
+          pub fn builder() -> #builder_ident {
+            #builder_ident {
+              #(#data_idents: std::option::Option::None),*
+            }
+          }
+        }
     );
     Ok(rt)
 }
