@@ -1,6 +1,7 @@
 use proc_macro::TokenStream;
+use proc_macro2::Ident;
 use quote::quote;
-use syn::{self, Data::Struct, DataStruct, Field, Fields::Named, FieldsNamed};
+use syn::{self, Data::Struct, DataStruct, Field, Fields::Named, FieldsNamed, Type};
 use syn::DeriveInput;
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
@@ -29,6 +30,8 @@ fn get_expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let builder_name = format!("{}Builder", ident_literal);
     let builder_ident = syn::Ident::new(&builder_name, st.span());
 
+    let setters = gen_setter(&data_idents, &data_types)?;
+
     let rt = quote!(
         struct #builder_ident {
             #(#data_idents: std::option::Option<#data_types>),*
@@ -40,7 +43,26 @@ fn get_expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             }
           }
         }
+        impl #builder_ident {
+            #setters
+        }
     );
+    Ok(rt)
+}
+
+fn gen_setter(idents: &Vec<&Option<Ident>>, types: &Vec<&Type>) -> syn::Result<proc_macro2::TokenStream> {
+    let mut rt = proc_macro2::TokenStream::new();
+
+    for (ident, type_) in idents.iter().zip(types.iter()) {
+        let one_ts = quote!(
+            fn #ident(&mut self, value: #type_) -> &mut Self {
+                self.#ident = std::option::Option::Some(value);
+                self
+            }
+        );
+        rt.extend(one_ts);
+    }
+
     Ok(rt)
 }
 
