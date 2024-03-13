@@ -31,6 +31,7 @@ fn get_expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let builder_ident = syn::Ident::new(&builder_name, st.span());
 
     let setters = gen_setter(&data_idents, &data_types)?;
+    let build_fn = gen_build_fields(&data_idents)?;
 
     let rt = quote!(
         struct #builder_ident {
@@ -46,7 +47,26 @@ fn get_expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         impl #builder_ident {
             #setters
         }
+        impl CommandBuilder {
+            fn build(&self) -> std::result::Result<Command, Box<dyn std::error::Error>> {
+                Ok(Command {
+                    #build_fn
+                })
+            }
+        }
     );
+    Ok(rt)
+}
+
+fn gen_build_fields(idents: &Vec<&Option<Ident>>) -> syn::Result<proc_macro2::TokenStream> {
+    let mut rt = proc_macro2::TokenStream::new();
+    for ident in idents.iter() {
+        let one = quote!(
+            #ident: self.#ident.clone().unwrap(),
+        );
+        rt.extend(one);
+    }
+
     Ok(rt)
 }
 
