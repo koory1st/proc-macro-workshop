@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::Ident;
 use quote::quote;
-use syn::{self, Data::Struct, DataStruct, Field, Fields::Named, FieldsNamed, Type};
+use syn::{self, Data::Struct, DataStruct, Field, Fields::Named, FieldsNamed, Type, Path};
 use syn::DeriveInput;
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
@@ -30,12 +30,12 @@ fn get_expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let builder_name = format!("{}Builder", ident_literal);
     let builder_ident = syn::Ident::new(&builder_name, st.span());
 
-    let setters = gen_setter(&data_idents, &data_types)?;
+    let (builder_fields, setters) = gen_setter(&data_idents, &data_types)?;
     let build_fn = gen_build_fields(&data_idents)?;
 
     let rt = quote!(
         struct #builder_ident {
-            #(#data_idents: std::option::Option<#data_types>),*
+            #builder_fields
         }
         impl #ident {
           pub fn builder() -> #builder_ident {
@@ -70,20 +70,49 @@ fn gen_build_fields(idents: &Vec<&Option<Ident>>) -> syn::Result<proc_macro2::To
     Ok(rt)
 }
 
-fn gen_setter(idents: &Vec<&Option<Ident>>, types: &Vec<&Type>) -> syn::Result<proc_macro2::TokenStream> {
-    let mut rt = proc_macro2::TokenStream::new();
+fn gen_setter(idents: &Vec<&Option<Ident>>, types: &Vec<&Type>) -> syn::Result<(proc_macro2::TokenStream, proc_macro2::TokenStream)> {
+    let mut setter_fields = proc_macro2::TokenStream::new();
+    let mut builder_fields = proc_macro2::TokenStream::new();
 
     for (ident, type_) in idents.iter().zip(types.iter()) {
-        let one_ts = quote!(
-            fn #ident(&mut self, value: #type_) -> &mut Self {
+        let ty = match get_type_in_option(type_) {
+            None => type_,
+            Some(t) => t,
+        };
+
+        let setter_ts = quote!(
+            fn #ident(&mut self, value: #ty) -> &mut Self {
                 self.#ident = std::option::Option::Some(value);
                 self
             }
         );
-        rt.extend(one_ts);
+        eprintln!("setter_ts:{:#?}", &setter_ts);
+        setter_fields.extend(setter_ts);
+
+        let builder_ts = quote!(
+            #ident: std::option::Option<#ty>,
+        );
+        eprintln!("builder_ts:{:#?}", &builder_ts);
+        builder_fields.extend(builder_ts);
     }
 
-    Ok(rt)
+    Ok((builder_fields, setter_fields))
+}
+
+fn get_type_in_option(type_:&Type) -> Option<&Type> {
+    if let syn::Type::Path(syn::TypePath{path: syn::Path{ref segments, ..},..}) = type_ {
+        if let Some(segment) = segments.last() {
+            if segment.ident != "Option" {
+                return Some(type_);
+            }
+            if let syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments{ref args, ..}) = segment.arguments {
+                if let Some(syn::GenericArgument::Type(ref ty)) = args.first() {
+                    return Some(ty);
+                }
+            }
+        }
+    }
+    None
 }
 
 fn get_data(st: &DeriveInput) -> syn::Result<&Punctuated<Field, Comma>> {
