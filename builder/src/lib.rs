@@ -30,7 +30,7 @@ fn get_expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let builder_name = format!("{}Builder", ident_literal);
     let builder_ident = syn::Ident::new(&builder_name, st.span());
 
-    let (builder_fields, setters) = gen_setter(&data_idents, &data_types)?;
+    let (builder_fields, setters, build_fn_fields) = gen_setter(&data_idents, &data_types)?;
     let build_fn = gen_build_fields(&data_idents)?;
 
     let rt = quote!(
@@ -50,7 +50,7 @@ fn get_expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         impl CommandBuilder {
             fn build(&self) -> std::result::Result<Command, Box<dyn std::error::Error>> {
                 Ok(Command {
-                    #build_fn
+                    #build_fn_fields
                 })
             }
         }
@@ -70,14 +70,19 @@ fn gen_build_fields(idents: &Vec<&Option<Ident>>) -> syn::Result<proc_macro2::To
     Ok(rt)
 }
 
-fn gen_setter(idents: &Vec<&Option<Ident>>, types: &Vec<&Type>) -> syn::Result<(proc_macro2::TokenStream, proc_macro2::TokenStream)> {
+fn gen_setter(idents: &Vec<&Option<Ident>>, types: &Vec<&Type>) -> syn::Result<(proc_macro2::TokenStream, proc_macro2::TokenStream, proc_macro2::TokenStream)> {
     let mut setter_fields = proc_macro2::TokenStream::new();
     let mut builder_fields = proc_macro2::TokenStream::new();
+    let mut build_fn_fields = proc_macro2::TokenStream::new();
 
     for (ident, type_) in idents.iter().zip(types.iter()) {
+        let mut is_option = false;
         let ty = match get_type_in_option(type_) {
             None => type_,
-            Some(t) => t,
+            Some((t, option_flg)) => {
+                is_option = option_flg;
+                t
+            },
         };
 
         let setter_ts = quote!(
@@ -94,20 +99,31 @@ fn gen_setter(idents: &Vec<&Option<Ident>>, types: &Vec<&Type>) -> syn::Result<(
         );
         eprintln!("builder_ts:{:#?}", &builder_ts);
         builder_fields.extend(builder_ts);
+
+        let build_fn_ts = if is_option {
+            quote!(
+                #ident: self.#ident.clone(),
+            )
+        } else {
+            quote!(
+                #ident: self.#ident.clone().unwrap(),
+            )
+        };
+        build_fn_fields.extend(build_fn_ts);
     }
 
-    Ok((builder_fields, setter_fields))
+    Ok((builder_fields, setter_fields, build_fn_fields))
 }
 
-fn get_type_in_option(type_:&Type) -> Option<&Type> {
+fn get_type_in_option(type_:&Type) -> Option<(&Type,bool)> {
     if let syn::Type::Path(syn::TypePath{path: syn::Path{ref segments, ..},..}) = type_ {
         if let Some(segment) = segments.last() {
             if segment.ident != "Option" {
-                return Some(type_);
+                return Some((type_, false));
             }
             if let syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments{ref args, ..}) = segment.arguments {
                 if let Some(syn::GenericArgument::Type(ref ty)) = args.first() {
-                    return Some(ty);
+                    return Some((ty, true));
                 }
             }
         }
