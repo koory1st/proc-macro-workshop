@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::Ident;
 use quote::quote;
-use syn::{self, Data::Struct, DataStruct, Field, Fields::Named, FieldsNamed, Type, Path};
+use syn::{self, Data::Struct, DataStruct, Field, Fields::Named, FieldsNamed, Type, Path, Error};
 use syn::DeriveInput;
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
@@ -9,7 +9,7 @@ use syn::token::Comma;
 
 #[proc_macro_derive(Builder)]
 pub fn derive(input: TokenStream) -> TokenStream {
-    let st = syn::parse_macro_input!(input as syn::DeriveInput);
+    let st = syn::parse_macro_input!(input as DeriveInput);
 
     let rt = get_expand(&st);
 
@@ -23,31 +23,61 @@ fn get_expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let ident = &st.ident;
     let ident_literal = st.ident.to_string();
 
-    let data = get_data(st)?;
-    let data_idents:Vec<_>  = data.iter().map(|f| &f.ident).collect();
-    let data_types:Vec<_>  = data.iter().map(|f| &f.ty).collect();
-
     let builder_name = format!("{}Builder", ident_literal);
     let builder_ident = syn::Ident::new(&builder_name, st.span());
 
-    let (builder_fields, setters, build_fn_fields) = gen_setter(&data_idents, &data_types)?;
-    let build_fn = gen_build_fields(&data_idents)?;
+    let data = get_data(st)?;
 
+    let mut setter_fields = proc_macro2::TokenStream::new();
+    let mut builder_struct_fields = proc_macro2::TokenStream::new();
+    let mut builder_to_fields = proc_macro2::TokenStream::new();
+    let mut build_fn_fields = proc_macro2::TokenStream::new();
+    for one in data.iter() {
+        let field_ident = &one.ident;
+        let (field_type_ident, is_option) = get_type(&one.ty)?;
+
+        let setter_ts = quote!(
+            fn #field_ident(&mut self, value: #field_type_ident) -> &mut Self {
+                self.#field_ident = std::option::Option::Some(value);
+                self
+            }
+        );
+        setter_fields.extend(setter_ts);
+
+        let builder_ts = quote!(
+            #field_ident: std::option::Option<#field_type_ident>,
+        );
+        builder_struct_fields.extend(builder_ts);
+
+        let build_fn_ts = if is_option {
+            quote!(
+                #field_ident: self.#field_ident.clone(),
+            )
+        } else {
+            quote!(
+                #field_ident: self.#field_ident.clone().unwrap(),
+            )
+        };
+        build_fn_fields.extend(build_fn_ts);
+
+        let builder_to_ts = quote!(
+            #field_ident: std::option::Option::None,
+        );
+        builder_to_fields.extend(builder_to_ts);
+    }
     let rt = quote!(
         struct #builder_ident {
-            #builder_fields
+            #builder_struct_fields
         }
         impl #ident {
           pub fn builder() -> #builder_ident {
             #builder_ident {
-              #(#data_idents: std::option::Option::None),*
+              #builder_to_fields
             }
           }
         }
         impl #builder_ident {
-            #setters
-        }
-        impl CommandBuilder {
+            #setter_fields
             fn build(&self) -> std::result::Result<Command, Box<dyn std::error::Error>> {
                 Ok(Command {
                     #build_fn_fields
@@ -58,83 +88,27 @@ fn get_expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     Ok(rt)
 }
 
-fn gen_build_fields(idents: &Vec<&Option<Ident>>) -> syn::Result<proc_macro2::TokenStream> {
-    let mut rt = proc_macro2::TokenStream::new();
-    for ident in idents.iter() {
-        let one = quote!(
-            #ident: self.#ident.clone().unwrap(),
-        );
-        rt.extend(one);
-    }
-
-    Ok(rt)
-}
-
-fn gen_setter(idents: &Vec<&Option<Ident>>, types: &Vec<&Type>) -> syn::Result<(proc_macro2::TokenStream, proc_macro2::TokenStream, proc_macro2::TokenStream)> {
-    let mut setter_fields = proc_macro2::TokenStream::new();
-    let mut builder_fields = proc_macro2::TokenStream::new();
-    let mut build_fn_fields = proc_macro2::TokenStream::new();
-
-    for (ident, type_) in idents.iter().zip(types.iter()) {
-        let mut is_option = false;
-        let ty = match get_type_in_option(type_) {
-            None => type_,
-            Some((t, option_flg)) => {
-                is_option = option_flg;
-                t
-            },
-        };
-
-        let setter_ts = quote!(
-            fn #ident(&mut self, value: #ty) -> &mut Self {
-                self.#ident = std::option::Option::Some(value);
-                self
-            }
-        );
-        eprintln!("setter_ts:{:#?}", &setter_ts);
-        setter_fields.extend(setter_ts);
-
-        let builder_ts = quote!(
-            #ident: std::option::Option<#ty>,
-        );
-        eprintln!("builder_ts:{:#?}", &builder_ts);
-        builder_fields.extend(builder_ts);
-
-        let build_fn_ts = if is_option {
-            quote!(
-                #ident: self.#ident.clone(),
-            )
-        } else {
-            quote!(
-                #ident: self.#ident.clone().unwrap(),
-            )
-        };
-        build_fn_fields.extend(build_fn_ts);
-    }
-
-    Ok((builder_fields, setter_fields, build_fn_fields))
-}
-
-fn get_type_in_option(type_:&Type) -> Option<(&Type,bool)> {
-    if let syn::Type::Path(syn::TypePath{path: syn::Path{ref segments, ..},..}) = type_ {
+fn get_type(type_:&Type) -> syn::Result<(&Type,bool)> {
+    if let Type::Path(syn::TypePath{path: Path{ref segments, ..},..}) = type_ {
         if let Some(segment) = segments.last() {
             if segment.ident != "Option" {
-                return Some((type_, false));
+                return Ok((type_, false));
             }
-            if let syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments{ref args, ..}) = segment.arguments {
+            if let syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments { ref args, .. }) = segment.arguments {
                 if let Some(syn::GenericArgument::Type(ref ty)) = args.first() {
-                    return Some((ty, true));
+                    return Ok((ty, true));
                 }
             }
         }
     }
-    None
+    Err(Error::new_spanned(type_, "No type"))
 }
+
 
 fn get_data(st: &DeriveInput) -> syn::Result<&Punctuated<Field, Comma>> {
     if let Struct(DataStruct { fields: Named(FieldsNamed { named: ref fields, .. }), .. }) = st.data {
         return Ok(fields);
     }
 
-    Err(syn::Error::new_spanned(st, "No struct"))
+    Err(Error::new_spanned(st, "No struct"))
 }

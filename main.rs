@@ -11,18 +11,21 @@ use derive_builder::Builder;
 #[derive(Builder)]
 pub struct Command {
   executable: String,
+  #[builder(each = "arg")]
   args: Vec<String>,
+  #[builder(each = "env")]
   env: Vec<String>,
-  current_dir: String,
+  current_dir: Option<String>,
 }
-// impl CommandBuilder {
-//   fn build(&self) -> std::result::Result<Command, Box<dyn std::error::Error>> {
-//     Ok(Command {
-//       executable: self.executable.clone().unwrap(),
-//       args: self.args.clone().unwrap(),
-//       env: self.env.clone().unwrap(),
-//       current_dir: self.current_dir.clone().unwrap(),
-//     })
-//   }
-// }
-fn main() {}
+
+fn main() {
+  let command = Command::builder()
+    .executable("cargo".to_owned())
+    .arg("build".to_owned())
+    .arg("--release".to_owned())
+    .build()
+    .unwrap();
+
+  assert_eq!(command.executable, "cargo");
+  assert_eq!(command.args, vec!["build", "--release"]);
+}
