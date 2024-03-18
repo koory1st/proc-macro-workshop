@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::Ident;
 use quote::quote;
-use syn::{self, Data::Struct, DataStruct, Field, Fields::Named, FieldsNamed, Type, Path, Error};
+use syn::{self, Data::Struct, DataStruct, Field, Fields::Named, FieldsNamed, Type, Path, Error, Attribute};
 use syn::DeriveInput;
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
@@ -33,6 +33,7 @@ fn get_expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let mut builder_to_fields = proc_macro2::TokenStream::new();
     let mut build_fn_fields = proc_macro2::TokenStream::new();
     for one in data.iter() {
+        let each_content = get_each_content(&one.attrs);
         let field_ident = &one.ident;
         let (field_type_ident, is_option) = get_type(&one.ty)?;
 
@@ -86,6 +87,22 @@ fn get_expand(st: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         }
     );
     Ok(rt)
+}
+
+fn get_each_content(attrs: &Vec<Attribute>) -> Option<proc_macro2::TokenStream> {
+    if attrs.len()  == 0 {
+        return None;
+    }
+
+    let path = attrs.iter().map(|item| {
+        if item.path.segments.iter().find(|ident| { ident.ident == "builder" }).is_none() {
+            return;
+        }
+        // let each_field = item.tokens
+    });
+    dbg!(&attrs);
+
+    None
 }
 
 fn get_type(type_:&Type) -> syn::Result<(&Type,bool)> {
