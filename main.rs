@@ -18,6 +18,13 @@ pub struct Command {
   current_dir: Option<String>,
 }
 
+// impl CommandBuilder {
+//   pub fn arg(&mut self, value: String) -> &mut Self {
+//     self.args.
+//     self
+//   }
+// }
+
 fn main() {
   let command = Command::builder()
     .executable("cargo".to_owned())
